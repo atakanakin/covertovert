@@ -6,9 +6,12 @@
 Basic ICMP Documentation
 ========================
 
-Please add your names and group ID here by editing `index.rst` in the docs folder.
+**Names and Student IDs**:
+- Ali Atakan Akın (2448058)
+- Tahsin Elmas (2476844)
 
-
+**Group ID**: 17
+**Github Repository**: (https://github.com/atakanakin/covertovert)
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
