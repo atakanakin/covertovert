@@ -4,6 +4,8 @@ import struct
 from scapy.layers.ntp import NTPHeader
 from datetime import datetime
 from time import sleep
+import random
+import string
 
 
 class StopSniffingException(Exception):
@@ -21,61 +23,51 @@ class MyCovertChannel(CovertChannelBase):
         """
         super().__init__()
 
+    def generate_random_char(self):
+        """Generate random printable ASCII character"""
+        return random.choice(string.printable)
+
     def encode_bit_into_timestamp(self, timestamp, bit):
         """
-        Decides whether to flip the bit or not based on the 1's count in the last 12 bits of the timestamp
-
-        :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
-        :param bit: bit to encode
-        :return: encoded bit
+        Encode bit using random char in timestamp
+        Format: [...23 bits...][8 bits char][1 bit data]
         """
-        # Ensure timestamp is 32 bits
-        timestamp = timestamp & 0xFFFFFFFF
+        # Generate random char and get its ASCII value
+        random_char = self.generate_random_char()
+        char_value = ord(random_char)
 
-        # Use more reliable encoding based on timestamp properties
-        binary_current_time = format(timestamp, "032b")
+        # Clear last 9 bits of timestamp and shift left
+        timestamp = (timestamp >> 9) << 9
 
-        # Use last 12 bits for encoding decision
-        window = binary_current_time[-12:]
+        # Insert char value in bits 1-8
+        timestamp |= char_value << 1
 
-        # Count 1s in the window for encoding decision
-        ones_count = window.count("1")
-
-        # Determine if we should flip based on ones count
+        # Decide flip based on 1's count in char
+        ones_count = bin(char_value).count("1")
         should_flip = (ones_count % 2) == 1
 
         # Apply encoding
-        if should_flip:
-            final_bit = 1 - bit
-        else:
-            final_bit = bit
+        final_bit = (1 - bit) if should_flip else bit
 
-        # Set the least significant bit
-        return (timestamp & ~1) | final_bit
+        # Set final bit
+        return timestamp | final_bit
 
     def decode_bit_from_timestamp(self, timestamp):
         """
-        Decides whether the bit was flipped or not based on the last 12 bits of the timestamp
-
-        :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
-        :return: encoded bit
+        Decode bit using char from timestamp
         """
-        # Ensure timestamp is 32 bits
-        timestamp = timestamp & 0xFFFFFFFF
+        # Extract char value (bits 1-8)
+        char_value = (timestamp >> 1) & 0xFF
 
-        # Extract the encoded bit
+        # Get encoded bit (last bit)
         encoded_bit = timestamp & 1
 
-        # Use same logic as encoding to determine if bit was flipped
-        binary_current_time = format(timestamp, "032b")
-        window = binary_current_time[-12:]
-        ones_count = window.count("1")
+        # Determine flip based on char's 1's count
+        ones_count = bin(char_value).count("1")
         should_flip = (ones_count % 2) == 1
 
         # Return original bit
-        if should_flip:
-            return 1 - encoded_bit
-        return encoded_bit
+        return (1 - encoded_bit) if should_flip else encoded_bit
 
     def send(self, log_file_name, parameter1, parameter2):
         """
@@ -94,9 +86,6 @@ class MyCovertChannel(CovertChannelBase):
             # Create IP and UDP headers
             ip_layer = IP(dst=parameter1)
             udp_layer = UDP(sport=123, dport=123)
-
-            # small delay to avoid packet loss
-            sleep(0.1)
 
             # Construct NTP payload (48 bytes) with a custom Reference Timestamp
             ntp_payload = bytearray(48)
