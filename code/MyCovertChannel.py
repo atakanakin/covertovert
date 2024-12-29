@@ -28,6 +28,7 @@ class MyCovertChannel(CovertChannelBase):
         return random.choice(string.printable)
 
     def encode_bit_into_timestamp(self, timestamp, bit):
+        # return 0 | bit
         """
         Encode bit using random char in timestamp
         Format: [...23 bits...][8 bits char][1 bit data]
@@ -53,12 +54,12 @@ class MyCovertChannel(CovertChannelBase):
         return timestamp | final_bit
 
     def decode_bit_from_timestamp(self, timestamp):
+        # return timestamp & 1
         """
         Decode bit using char from timestamp
         """
         # Extract char value (bits 1-8)
         char_value = (timestamp >> 1) & 0xFF
-
         # Get encoded bit (last bit)
         encoded_bit = timestamp & 1
 
@@ -118,9 +119,9 @@ class MyCovertChannel(CovertChannelBase):
             """
             if packet.haslayer(NTPHeader):
                 ntp_layer = packet[NTPHeader]
-                ref_timestamp = int(
-                    ntp_layer.ref * (2**32)
-                )  # Extract and scale the Reference Timestamp
+                ref_timestamp = struct.unpack_from("!Q", bytes(ntp_layer), 16)[
+                    0
+                ]  # Unpack timestamp from offset 16
                 bit = self.decode_bit_from_timestamp(int(ref_timestamp))
                 decoded_message.append(str(bit))
                 print(f"Decoded bit: {bit}")
