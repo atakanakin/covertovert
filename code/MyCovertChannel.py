@@ -1,7 +1,8 @@
 from CovertChannelBase import CovertChannelBase
 from scapy.all import IP, UDP, Raw
 import struct
-from scapy.layers.ntp import NTPHeader  # Ensure the NTP layer is imported
+from scapy.layers.ntp import NTPHeader
+
 class MyCovertChannel(CovertChannelBase):
     """
     - Implements a covert channel using NTP protocol's Reference Timestamp field.
@@ -38,14 +39,10 @@ class MyCovertChannel(CovertChannelBase):
         :param parameter2: Number of packets to send.
         """
         binary_message = self.generate_random_binary_message_with_logging(log_file_name,  max_length=parameter2)
-        message_length = len(binary_message)
-        print(f"Generated message: {message_length} characters long.")
-        binary_count_str = (bin(message_length)[2:]).zfill(32)
         
         print(f"Generated binary message: {binary_message}")
-        temp_payload = binary_count_str + binary_message
 
-        for i, bit in enumerate(temp_payload):
+        for i, bit in enumerate(binary_message):
             # Create IP and UDP headers
             ip_layer = IP(dst=parameter1)
             udp_layer = UDP(sport=123, dport=123)
@@ -58,7 +55,7 @@ class MyCovertChannel(CovertChannelBase):
             # Create the packet and send it
             packet = ip_layer / udp_layer / Raw(load=bytes(ntp_payload))
             super().send(packet)
-            print(f"Sent packet {i + 1}/{len(temp_payload)} with encoded bit: {bit}")
+            print(f"Sent packet {i + 1}/{len(binary_message)} with encoded bit: {bit}")
 
    
 
@@ -73,12 +70,8 @@ class MyCovertChannel(CovertChannelBase):
         from scapy.all import sniff
 
         print("Listening for packets...")
-        packets_length = sniff(filter=parameter1, count=32)
-        packet_count = int(self.receive_extract(packets_length), 2)
-        print(f"Expecting {packet_count} packets.")
 
-
-        packets = sniff(filter=parameter1, count=packet_count)
+        packets = sniff(filter=parameter1, count=parameter2)
 
         decoded_message = self.receive_extract(packets)
         final_message = ""
