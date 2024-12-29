@@ -1,7 +1,11 @@
 from CovertChannelBase import CovertChannelBase
-from scapy.all import IP, UDP, Raw
+from scapy.all import IP, UDP, Raw, sniff
 import struct
 from scapy.layers.ntp import NTPHeader
+
+
+class StopSniffingException(Exception):
+    pass
 
 class MyCovertChannel(CovertChannelBase):
     """
@@ -63,40 +67,42 @@ class MyCovertChannel(CovertChannelBase):
         """
         - Receives NTP packets, decodes the Reference Timestamp field, and reconstructs the message.
         :param parameter1: Filter for sniffing packets (e.g., "udp port 123").
-        :param parameter2: Number of packets to capture.
+        :param parameter2: Not used for fixed packet count in this implementation.
         :param parameter3: Not used in this implementation.
         :param log_file_name: File name to log the decoded message.
         """
-        from scapy.all import sniff
+        decoded_message = []
 
-        print("Listening for packets...")
-
-        packets = sniff(filter=parameter1, count=parameter2)
-
-        decoded_message = self.receive_extract(packets)
-        final_message = ""
-        # Log the decoded message
-        for i in range(0, len(decoded_message), 8):
-            decoded_char = self.convert_eight_bits_to_character(decoded_message[i:i+8])
-            final_message += decoded_char
-        self.log_message(final_message, log_file_name)
-        print(f"Decoded message logged to {log_file_name}.")
-
-    def receive_extract(self, packets):
-        """
-        - Extracts the Reference Timestamp field from an NTP packet.
-        :param packet: NTP packet to extract the Reference Timestamp.
-        :return: Extracted Reference Timestamp.
-        """
-        decoded_message = ""
-        for i, packet in enumerate(packets):
-            # print(f"Packet {i + 1}: {packet.summary()}")  # Debug packet summary
+        def packet_handler(packet):
+            """
+            Processes each packet, decodes its bit, and checks for the stop condition.
+            """
             if packet.haslayer(NTPHeader):
                 ntp_layer = packet[NTPHeader]
                 ref_timestamp = int(ntp_layer.ref * (2**32))  # Extract and scale the Reference Timestamp
                 bit = self.decode_bit_from_timestamp(ref_timestamp)
-                decoded_message += str(bit)
-                print(f"Decoded bit {i + 1}/{len(packets)}: {bit}")
-            else:
-                print(f"Packet {i + 1} does not contain an NTPHeader layer.")
-        return decoded_message
+                decoded_message.append(str(bit))
+                print(f"Decoded bit: {bit}")
+                
+                # Check if we have received 8 bits to form a character
+                if len(decoded_message) % 8 == 0:
+                    # Decode the last 8 bits into a character
+                    char = self.convert_eight_bits_to_character("".join(decoded_message[-8:]))
+                    print(f"Decoded character: {char}")
+                    if char == ".":
+                        raise StopSniffingException()  # Stop sniffing when the end marker is detected
+
+        try:
+            print("Listening for packets...")
+            sniff(filter=parameter1, prn=packet_handler)
+        except StopSniffingException:
+            print("End marker received. Stopping sniffing.")
+
+        # Combine the decoded message into characters
+        final_message = ""
+        for i in range(0, len(decoded_message), 8):
+            final_message += self.convert_eight_bits_to_character("".join(decoded_message[i:i+8]))
+
+        # Log the decoded message
+        self.log_message(final_message, log_file_name)
+        print(f"Decoded message logged to {log_file_name}.")
