@@ -2,10 +2,12 @@ from CovertChannelBase import CovertChannelBase
 from scapy.all import IP, UDP, Raw, sniff
 import struct
 from scapy.layers.ntp import NTPHeader
+from datetime import datetime
 
 
 class StopSniffingException(Exception):
     pass
+
 
 class MyCovertChannel(CovertChannelBase):
     """
@@ -20,30 +22,68 @@ class MyCovertChannel(CovertChannelBase):
 
     def encode_bit_into_timestamp(self, timestamp, bit):
         """
-        Encodes a single bit into the least significant bit of the Reference Timestamp.
-        :param timestamp: Original timestamp (integer).
-        :param bit: Bit to encode (0 or 1).
-        :return: Modified timestamp with encoded bit.
+        Decides whether to flip the bit or not based on the last 3 encoders
+
+        :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
+        :param bit: bit to encode
+        :return: encoded bit
         """
-        return (timestamp & ~1) | int(bit)
+        # turn the timestamp into binary and string and remove the last bit
+        binary_current_time = str(bin(timestamp)[2:].zfill(32))[:31]
+        # get last 4 bits
+        first_encoder = int(binary_current_time[-4:], 2)
+        second_encoder = int(binary_current_time[-8:-4], 2)
+        third_encoder = int(binary_current_time[-12:-8], 2)
+        if second_encoder == 0:
+            second_encoder = 3  # Avoid division by zero
+        p1 = first_encoder % second_encoder
+        p2 = third_encoder % second_encoder
+        val = p1 - p2
+        last_bit = val & 1
+        # if last bit is 0 the bit will stay as it is
+        # if last bit is 1 the bit will be flipped
+        final_bit = bit
+        if last_bit == 1:
+            final_bit = 1 - bit
+        return (timestamp & ~1) | final_bit
 
     def decode_bit_from_timestamp(self, timestamp):
         """
-        Decodes a single bit from the least significant bit of the Reference Timestamp.
-        :param timestamp: Modified timestamp (integer).
-        :return: Decoded bit (0 or 1).
+        Decides whether the bit was flipped or not based on the last 3 encoders
+
+        :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
+        :return: encoded bit
         """
-        return timestamp & 1
+        bit = timestamp & 1
+        # turn the timestamp into binary and string and remove the last bit
+        binary_current_time = str(bin(timestamp)[2:].zfill(32))[:31]
+        # get last 4 bits
+        first_encoder = int(binary_current_time[-4:], 2)
+        second_encoder = int(binary_current_time[-8:-4], 2)
+        third_encoder = int(binary_current_time[-12:-8], 2)
+        if second_encoder == 0:
+            second_encoder = 3  # Avoid division by zero
+        p1 = first_encoder % second_encoder
+        p2 = third_encoder % second_encoder
+        val = p1 - p2
+        last_bit = val & 1
+        # if last bit is 0 the bit will stay as it is
+        # if last bit is 1 the bit will be flipped
+        if last_bit == 1:
+            return 1 - bit
+        return bit
 
     def send(self, log_file_name, parameter1, parameter2):
         """
         - Generates a binary message, encodes it into NTP packets, and sends them to the receiver.
         :param log_file_name: File name to log the original message.
         :param parameter1: Receiver container's IP address.
-        :param parameter2: Number of packets to send.
+        :param parameter2: Random message max length.
         """
-        binary_message = self.generate_random_binary_message_with_logging(log_file_name,  max_length=parameter2)
-        
+        binary_message = self.generate_random_binary_message_with_logging(
+            log_file_name, max_length=parameter2
+        )
+
         print(f"Generated binary message: {binary_message}")
 
         for i, bit in enumerate(binary_message):
@@ -53,15 +93,18 @@ class MyCovertChannel(CovertChannelBase):
 
             # Construct NTP payload (48 bytes) with a custom Reference Timestamp
             ntp_payload = bytearray(48)
-            ref_timestamp = self.encode_bit_into_timestamp(0, bit)  # Encode the bit into timestamp
-            struct.pack_into('!Q', ntp_payload, 16, ref_timestamp)  # Pack timestamp at offset 16
+            current_timestamp = int(datetime.now().timestamp())
+            ref_timestamp = self.encode_bit_into_timestamp(
+                bit
+            )  # Encode the bit into timestamp
+            struct.pack_into(
+                "!Q", ntp_payload, 16, ref_timestamp
+            )  # Pack timestamp at offset 16
 
             # Create the packet and send it
             packet = ip_layer / udp_layer / Raw(load=bytes(ntp_payload))
             super().send(packet)
             print(f"Sent packet {i + 1}/{len(binary_message)} with encoded bit: {bit}")
-
-   
 
     def receive(self, parameter1, parameter2, parameter3, log_file_name):
         """
@@ -79,15 +122,19 @@ class MyCovertChannel(CovertChannelBase):
             """
             if packet.haslayer(NTPHeader):
                 ntp_layer = packet[NTPHeader]
-                ref_timestamp = int(ntp_layer.ref * (2**32))  # Extract and scale the Reference Timestamp
-                bit = self.decode_bit_from_timestamp(ref_timestamp)
+                ref_timestamp = int(
+                    ntp_layer.ref * (2**32)
+                )  # Extract and scale the Reference Timestamp
+                bit = self.decode_bit_from_timestamp(int(ref_timestamp))
                 decoded_message.append(str(bit))
                 print(f"Decoded bit: {bit}")
-                
+
                 # Check if we have received 8 bits to form a character
                 if len(decoded_message) % 8 == 0:
                     # Decode the last 8 bits into a character
-                    char = self.convert_eight_bits_to_character("".join(decoded_message[-8:]))
+                    char = self.convert_eight_bits_to_character(
+                        "".join(decoded_message[-8:])
+                    )
                     print(f"Decoded character: {char}")
                     if char == ".":
                         raise StopSniffingException()  # Stop sniffing when the end marker is detected
@@ -101,7 +148,9 @@ class MyCovertChannel(CovertChannelBase):
         # Combine the decoded message into characters
         final_message = ""
         for i in range(0, len(decoded_message), 8):
-            final_message += self.convert_eight_bits_to_character("".join(decoded_message[i:i+8]))
+            final_message += self.convert_eight_bits_to_character(
+                "".join(decoded_message[i : i + 8])
+            )
 
         # Log the decoded message
         self.log_message(final_message, log_file_name)
