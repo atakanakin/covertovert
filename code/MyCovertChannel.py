@@ -95,7 +95,7 @@ class MyCovertChannel(CovertChannelBase):
             ntp_payload = bytearray(48)
             current_timestamp = int(datetime.now().timestamp())
             ref_timestamp = self.encode_bit_into_timestamp(
-                bit
+                current_timestamp, bit
             )  # Encode the bit into timestamp
             struct.pack_into(
                 "!Q", ntp_payload, 16, ref_timestamp
