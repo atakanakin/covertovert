@@ -3,6 +3,7 @@ from scapy.all import IP, UDP, Raw, sniff
 import struct
 from scapy.layers.ntp import NTPHeader
 from datetime import datetime
+from time import sleep
 
 
 class StopSniffingException(Exception):
@@ -22,56 +23,59 @@ class MyCovertChannel(CovertChannelBase):
 
     def encode_bit_into_timestamp(self, timestamp, bit):
         """
-        Decides whether to flip the bit or not based on the last 3 encoders
+        Decides whether to flip the bit or not based on the 1's count in the last 12 bits of the timestamp
 
         :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
         :param bit: bit to encode
         :return: encoded bit
         """
-        # turn the timestamp into binary and string and remove the last bit
-        binary_current_time = str(bin(timestamp)[2:].zfill(32))[:31]
-        # get last 4 bits
-        first_encoder = int(binary_current_time[-4:], 2)
-        second_encoder = int(binary_current_time[-8:-4], 2)
-        third_encoder = int(binary_current_time[-12:-8], 2)
-        if second_encoder == 0:
-            second_encoder = 3  # Avoid division by zero
-        p1 = first_encoder % second_encoder
-        p2 = third_encoder % second_encoder
-        val = p1 - p2
-        last_bit = val & 1
-        # if last bit is 0 the bit will stay as it is
-        # if last bit is 1 the bit will be flipped
-        final_bit = bit
-        if last_bit == 1:
+        # Ensure timestamp is 32 bits
+        timestamp = timestamp & 0xFFFFFFFF
+
+        # Use more reliable encoding based on timestamp properties
+        binary_current_time = format(timestamp, "032b")
+
+        # Use last 12 bits for encoding decision
+        window = binary_current_time[-12:]
+
+        # Count 1s in the window for encoding decision
+        ones_count = window.count("1")
+
+        # Determine if we should flip based on ones count
+        should_flip = (ones_count % 2) == 1
+
+        # Apply encoding
+        if should_flip:
             final_bit = 1 - bit
+        else:
+            final_bit = bit
+
+        # Set the least significant bit
         return (timestamp & ~1) | final_bit
 
     def decode_bit_from_timestamp(self, timestamp):
         """
-        Decides whether the bit was flipped or not based on the last 3 encoders
+        Decides whether the bit was flipped or not based on the last 12 bits of the timestamp
 
         :param timestamp: timestamp used to encode the bit received datetime.now().timestamp()
         :return: encoded bit
         """
-        bit = timestamp & 1
-        # turn the timestamp into binary and string and remove the last bit
-        binary_current_time = str(bin(timestamp)[2:].zfill(32))[:31]
-        # get last 4 bits
-        first_encoder = int(binary_current_time[-4:], 2)
-        second_encoder = int(binary_current_time[-8:-4], 2)
-        third_encoder = int(binary_current_time[-12:-8], 2)
-        if second_encoder == 0:
-            second_encoder = 3  # Avoid division by zero
-        p1 = first_encoder % second_encoder
-        p2 = third_encoder % second_encoder
-        val = p1 - p2
-        last_bit = val & 1
-        # if last bit is 0 the bit will stay as it is
-        # if last bit is 1 the bit will be flipped
-        if last_bit == 1:
-            return 1 - bit
-        return bit
+        # Ensure timestamp is 32 bits
+        timestamp = timestamp & 0xFFFFFFFF
+
+        # Extract the encoded bit
+        encoded_bit = timestamp & 1
+
+        # Use same logic as encoding to determine if bit was flipped
+        binary_current_time = format(timestamp, "032b")
+        window = binary_current_time[-12:]
+        ones_count = window.count("1")
+        should_flip = (ones_count % 2) == 1
+
+        # Return original bit
+        if should_flip:
+            return 1 - encoded_bit
+        return encoded_bit
 
     def send(self, log_file_name, parameter1, parameter2):
         """
@@ -90,6 +94,9 @@ class MyCovertChannel(CovertChannelBase):
             # Create IP and UDP headers
             ip_layer = IP(dst=parameter1)
             udp_layer = UDP(sport=123, dport=123)
+
+            # small delay to avoid packet loss
+            sleep(0.1)
 
             # Construct NTP payload (48 bytes) with a custom Reference Timestamp
             ntp_payload = bytearray(48)
